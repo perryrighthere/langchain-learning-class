@@ -11,7 +11,9 @@ description: Implement and refactor this LangChain-centric compliance Q&A projec
 2. Implement with clear module boundaries under `src/compliance_bot/`.
 3. Keep functions short, typed, and deterministic; remove dead branches quickly.
 4. Add or update tests in the same change.
-5. Update project hygiene files before finishing.
+5. If the request is week-based teaching, include a weekly teaching script update.
+6. If the request is week-based teaching, include a weekly homework artifact update.
+7. Update project hygiene files before finishing.
 
 ## LangChain-First Rules
 
@@ -48,9 +50,20 @@ description: Implement and refactor this LangChain-centric compliance Q&A projec
 2. Update `requirements.txt` when imports or runtime dependencies change.
 3. Update `.gitignore` when new generated/local artifacts appear.
 
+## Weekly Teaching Integration
+
+1. For week-oriented teaching tasks, create or update `docs/teaching-scripts/week-XX.md`.
+2. Teaching scripts must include:
+   - weekly teaching goal,
+   - technical architecture with Mermaid,
+   - detailed technical teaching mapped to current modules.
+3. For week-oriented teaching tasks, create or update `docs/homework/week-XX.md`.
+4. Homework must map directly to implemented code and tests in the same week.
+5. Include runnable verification commands and expected outcomes.
+6. Keep teaching/homework content operational and repository-specific, not generic theory.
+
 ## Definition of Done
 
 1. Feature works end-to-end with tests.
 2. LangChain/LangGraph usage is primary, not incidental.
 3. README, dependency list, and ignore rules are synchronized.
-

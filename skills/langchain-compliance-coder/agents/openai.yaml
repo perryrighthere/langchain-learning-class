@@ -1,4 +1,4 @@
 interface:
   display_name: "LangChain Compliance Coder"
   short_description: "Build clean LangChain-first compliance bot code."
-  default_prompt: "Use $langchain-compliance-coder to implement the next compliance bot feature with tests and audit-safe behavior."
+  default_prompt: "Use $langchain-compliance-coder to implement the next compliance bot feature with tests and audit-safe behavior; for week-based teaching tasks, update docs/teaching-scripts/week-XX.md and docs/homework/week-XX.md."
