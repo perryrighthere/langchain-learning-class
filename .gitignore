@@ -32,3 +32,6 @@ build/
 # Logs and runtime files
 *.log
 *.pid
+
+# Ingestion artifacts
+artifacts/
