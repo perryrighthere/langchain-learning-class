@@ -1,4 +1,0 @@
-interface:
-  display_name: "Project Repo Hygiene"
-  short_description: "Keep README, requirements, and ignore rules synced."
-  default_prompt: "Use $project-repo-hygiene to align README, requirements.txt, and .gitignore with the latest code changes, and keep weekly teaching artifacts in docs/teaching-scripts/ and docs/homework/."
