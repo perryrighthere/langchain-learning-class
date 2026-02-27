@@ -1,0 +1,11 @@
+{
+  "content": "Vendor data sharing is allowed only after legal approval, security review, and signed data processing agreement. High-risk vendors also require procurement committee approval.",
+  "metadata": {
+    "doc_id": "vendor-policy-v2",
+    "effective_date": "2026-02-01",
+    "owner": "legal-compliance-team",
+    "jurisdiction": "US",
+    "policy_scope": "vendor,privacy",
+    "section": "7.1"
+  }
+}

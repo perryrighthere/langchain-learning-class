@@ -1,0 +1,56 @@
+[
+  {
+    "case_id": "expense-direct",
+    "question": "Who can approve expense reimbursement above threshold?",
+    "expected_doc_ids": ["expense-policy-v1"],
+    "filters": {
+      "jurisdiction": "US",
+      "policy_scope": ["expense"]
+    }
+  },
+  {
+    "case_id": "vendor-direct",
+    "question": "What approvals are required for vendor data sharing?",
+    "expected_doc_ids": ["vendor-policy-v2"],
+    "filters": {
+      "jurisdiction": "US",
+      "policy_scope": ["vendor"]
+    }
+  },
+  {
+    "case_id": "retention-paraphrase-broad",
+    "question": "How long should bookkeeping evidence be preserved for compliance audits?",
+    "expected_doc_ids": ["records-retention-policy-v1"],
+    "filters": {
+      "jurisdiction": "US",
+      "policy_scope": []
+    }
+  },
+  {
+    "case_id": "cross-policy-composite-broad",
+    "question": "Before reimbursing a high-value trip and sharing customer data with a partner vendor, which approvals are needed?",
+    "expected_doc_ids": ["expense-policy-v1", "vendor-policy-v2"],
+    "filters": {
+      "jurisdiction": "US",
+      "policy_scope": []
+    }
+  },
+  {
+    "case_id": "travel-plus-retention",
+    "question": "For travel claims audit, who signs off and how long should related records be kept?",
+    "expected_doc_ids": ["expense-policy-v1", "records-retention-policy-v1"],
+    "filters": {
+      "jurisdiction": "US",
+      "policy_scope": []
+    }
+  },
+  {
+    "case_id": "third-party-synonym",
+    "question": "What gate is needed before sharing customer information with an external partner?",
+    "expected_doc_ids": ["vendor-policy-v2"],
+    "filters": {
+      "jurisdiction": "US",
+      "policy_scope": []
+    }
+  }
+]

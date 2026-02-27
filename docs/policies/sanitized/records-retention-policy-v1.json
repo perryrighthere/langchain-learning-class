@@ -1,0 +1,11 @@
+{
+  "content": "Financial records must be retained for seven years. Customer support records must be retained for three years unless litigation hold is active.",
+  "metadata": {
+    "doc_id": "records-retention-policy-v1",
+    "effective_date": "2026-02-01",
+    "owner": "records-governance-team",
+    "jurisdiction": "US",
+    "policy_scope": "retention,records",
+    "section": "3.4"
+  }
+}

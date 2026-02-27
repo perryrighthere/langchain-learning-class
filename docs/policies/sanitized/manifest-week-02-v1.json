@@ -1,0 +1,56 @@
+{
+  "chunk_count": 3,
+  "chunks": [
+    {
+      "chunk_id": "bcbc46e696ec403f",
+      "chunk_index": 0,
+      "content": "Globally, an estimated 346 million people have diabetes. In the South-East Asia Region, nearly 71 million people were estimated to be living with diabetes in 2010 and an equal number had impaired glucose tolerance. Diabetes is a chronic condition that occurs when blood glucose levels remain above normal limits. Type 1 diabetes is due to deficient insulin production. Type 2 diabetes results from the body\u2019s ineffective use of insulin and accounts for over 90 percent of cases. Risk factors include obesity, tobacco use, alcohol consumption, physical inactivity, and family history. Uncontrolled diabetes increases risk of heart disease and stroke. Diabetic retinopathy may cause blindness. Diabetic",
+      "doc_id": "policy-diabetes-2012",
+      "metadata": {
+        "doc_id": "policy-diabetes-2012",
+        "effective_date": "2012-10-01",
+        "jurisdiction": "GLOBAL",
+        "owner": "Department of Sustainable Development and Healthy Environments",
+        "source_path": "docs/policies/sanitized/policy_test2.json"
+      },
+      "version_tag": "week-02-v1"
+    },
+    {
+      "chunk_id": "c57d30a228f00886",
+      "chunk_index": 1,
+      "content": "ry. Uncontrolled diabetes increases risk of heart disease and stroke. Diabetic retinopathy may cause blindness. Diabetic neuropathy increases risk of foot ulcers and amputation. Early diagnosis can be achieved through blood testing. Treatment involves controlling blood glucose, blood pressure, and blood lipids. Lifestyle measures such as healthy eating, regular physical activity, avoiding tobacco, and monitoring blood glucose are critical. Governments and communities should promote public awareness and access to essential medicines.",
+      "doc_id": "policy-diabetes-2012",
+      "metadata": {
+        "doc_id": "policy-diabetes-2012",
+        "effective_date": "2012-10-01",
+        "jurisdiction": "GLOBAL",
+        "owner": "Department of Sustainable Development and Healthy Environments",
+        "source_path": "docs/policies/sanitized/policy_test2.json"
+      },
+      "version_tag": "week-02-v1"
+    },
+    {
+      "chunk_id": "00e9e1b97cb7d4a9",
+      "chunk_index": 0,
+      "content": "All customer data exports require manager approval and must be logged in the audit system. Access reviews are performed quarterly.",
+      "doc_id": "policy-test1",
+      "metadata": {
+        "doc_id": "policy-test1",
+        "effective_date": "2026-02-26",
+        "jurisdiction": "US",
+        "owner": "compliance-team",
+        "source_path": "docs/policies/sanitized/policy_test1.json"
+      },
+      "version_tag": "week-02-v1"
+    }
+  ],
+  "doc_count": 2,
+  "manifest_hash": "9ee037330637496e4068461d2e0165228fb82813b41388950a6029ac9ced9611",
+  "metadata_coverage": {
+    "doc_id": 1.0,
+    "effective_date": 1.0,
+    "jurisdiction": 1.0,
+    "owner": 1.0
+  },
+  "version_tag": "week-02-v1"
+}

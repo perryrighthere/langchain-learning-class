@@ -21,7 +21,11 @@ def load_policy_documents(source_dir: Path) -> list[LoadedDocument]:
     if not source_dir.exists():
         raise FileNotFoundError(f"source directory does not exist: {source_dir}")
 
-    policy_files = sorted(path for path in source_dir.glob("*.json") if path.is_file())
+    policy_files = sorted(
+        path
+        for path in source_dir.glob("*.json")
+        if path.is_file() and not path.name.startswith("manifest-")
+    )
     if not policy_files:
         raise ValueError(f"no policy JSON files found in {source_dir}")
 

@@ -1,0 +1,11 @@
+{
+  "content": "Expense reimbursement above USD 500 requires finance manager approval and a valid receipt. Travel expenses above USD 1500 require director approval before reimbursement.",
+  "metadata": {
+    "doc_id": "expense-policy-v1",
+    "effective_date": "2026-02-01",
+    "owner": "finance-compliance-team",
+    "jurisdiction": "US",
+    "policy_scope": "expense,travel",
+    "section": "4.2"
+  }
+}
