@@ -1,6 +1,7 @@
 """Pydantic schemas for the compliance bot."""
 
 from compliance_bot.schemas.audit import AuditEvent
+from compliance_bot.schemas.answer import GroundedAnswerDraft, GroundedAnswerResponse
 from compliance_bot.schemas.ingestion import (
     ChunkRecord,
     CorpusManifest,
@@ -44,4 +45,6 @@ __all__ = [
     "RetrievalBenchmarkCase",
     "RetrievalBenchmarkResult",
     "RetrievalBenchmarkReport",
+    "GroundedAnswerDraft",
+    "GroundedAnswerResponse",
 ]
