@@ -1,0 +1,714 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Week 5 Comparison Viewer</title>
+    <style>
+      :root {
+        --bg: #f7f3ec;
+        --panel: #fffaf2;
+        --ink: #1f1f1f;
+        --muted: #635e54;
+        --line: #d8cdbb;
+        --accent: #0c6b58;
+        --accent-2: #b24d17;
+        --warn: #9c2f2f;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 20% 0%, #e8f2ee 0%, transparent 45%),
+          radial-gradient(circle at 80% 0%, #f8e9df 0%, transparent 45%),
+          var(--bg);
+      }
+
+      .wrap {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+
+      .hero {
+        background: linear-gradient(120deg, #0f3f36, #155a49 55%, #2d6f5e);
+        color: #f2f8f6;
+        border-radius: 16px;
+        padding: 20px 22px;
+        border: 1px solid #0f4f42;
+        box-shadow: 0 14px 30px rgba(18, 41, 33, 0.2);
+      }
+
+      .hero h1 {
+        margin: 0 0 8px;
+        font-size: 1.55rem;
+      }
+
+      .hero p {
+        margin: 0;
+        color: #d7e9e3;
+      }
+
+      .panel {
+        margin-top: 16px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 16px;
+        background: var(--panel);
+      }
+
+      .panel h2 {
+        margin: 0 0 10px;
+        font-size: 1.05rem;
+      }
+
+      .controls {
+        display: grid;
+        gap: 12px;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 180px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 12px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.85rem;
+        color: var(--ink);
+        background: #fff;
+      }
+
+      .buttons {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      button,
+      .file-label {
+        border: 1px solid transparent;
+        border-radius: 10px;
+        padding: 9px 12px;
+        font-size: 0.88rem;
+        cursor: pointer;
+      }
+
+      button.primary {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      button.ghost,
+      .file-label {
+        background: #f7efe3;
+        color: #2f2a21;
+        border-color: var(--line);
+      }
+
+      #file-input {
+        display: none;
+      }
+
+      .status {
+        min-height: 20px;
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+
+      .status.error {
+        color: var(--warn);
+      }
+
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 10px;
+        background: #fff;
+      }
+
+      .label {
+        font-size: 0.78rem;
+        color: var(--muted);
+        margin-bottom: 6px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .value {
+        font-weight: 700;
+      }
+
+      .grid {
+        margin-top: 12px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .sub {
+        margin: 10px 0 6px;
+        font-size: 0.9rem;
+        color: #463f35;
+      }
+
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.82rem;
+        line-height: 1.38;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px;
+        background: #fff;
+        max-height: 360px;
+        overflow: auto;
+      }
+
+      .exact {
+        border-left: 4px solid var(--accent-2);
+      }
+
+      .path {
+        color: #7a2f10;
+      }
+
+      .viz-grid {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 12px;
+      }
+
+      .viz-card {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px;
+        background: #fff;
+      }
+
+      .metric-row {
+        display: grid;
+        grid-template-columns: 120px 1fr;
+        gap: 10px;
+        align-items: center;
+        margin: 10px 0;
+      }
+
+      .metric-name {
+        font-size: 0.8rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .metric-tracks {
+        display: grid;
+        gap: 6px;
+      }
+
+      .track {
+        height: 22px;
+        border-radius: 999px;
+        background: #f4eee2;
+        border: 1px solid #e6dccb;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .bar {
+        height: 100%;
+        width: 0%;
+        transition: width 0.6s ease;
+      }
+
+      .bar.linear {
+        background: linear-gradient(90deg, #b24d17, #cf6a31);
+      }
+
+      .bar.graph {
+        background: linear-gradient(90deg, #0c6b58, #19876e);
+      }
+
+      .track span {
+        position: absolute;
+        top: 2px;
+        right: 8px;
+        font-size: 0.74rem;
+        color: #2c2a27;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+
+      .legend {
+        display: flex;
+        gap: 12px;
+        font-size: 0.8rem;
+        color: var(--muted);
+        margin-bottom: 8px;
+      }
+
+      .legend-dot {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        margin-right: 6px;
+      }
+
+      .legend-dot.linear {
+        background: #c75f2b;
+      }
+
+      .legend-dot.graph {
+        background: #148069;
+      }
+
+      .timeline {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .step {
+        border: 1px solid #d8cfbf;
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-size: 0.78rem;
+        color: #6e6558;
+        background: #f7f1e6;
+        opacity: 0.65;
+        transform: translateY(3px);
+      }
+
+      .step.active {
+        color: #fff;
+        border-color: #0e6351;
+        background: linear-gradient(120deg, #0e6351, #1e8a71);
+        opacity: 1;
+        transform: translateY(0);
+        animation: pulse 0.35s ease;
+      }
+
+      .arrow {
+        color: #908575;
+        font-size: 0.85rem;
+      }
+
+      @keyframes pulse {
+        from {
+          transform: scale(0.97);
+        }
+        to {
+          transform: scale(1);
+        }
+      }
+
+      @media (max-width: 920px) {
+        .summary {
+          grid-template-columns: 1fr;
+        }
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        .viz-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <section class="hero">
+        <h1>Week 5 Frontend: LangChain vs LangGraph</h1>
+        <p>
+          Load the JSON produced by <code>compliance_bot.graph.comparison</code>. This page
+          shows exact response text and full raw payloads side-by-side.
+        </p>
+      </section>
+
+      <section class="panel">
+        <h2>Input JSON</h2>
+        <div class="controls">
+          <textarea
+            id="json-input"
+            placeholder='Paste comparison JSON here...'
+          ></textarea>
+          <div class="buttons">
+            <button id="render-btn" class="primary">Render Comparison</button>
+            <button id="clear-btn" class="ghost">Clear</button>
+            <label class="file-label" for="file-input">Load .json File</label>
+            <input id="file-input" type="file" accept=".json,application/json" />
+          </div>
+          <div id="status" class="status"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Shared Outcome</h2>
+        <div class="summary">
+          <div class="card">
+            <div class="label">Question</div>
+            <div class="value" id="question">-</div>
+          </div>
+          <div class="card">
+            <div class="label">Normal LangChain Decision</div>
+            <div class="value" id="linear-decision">-</div>
+          </div>
+          <div class="card">
+            <div class="label">LangGraph Decision</div>
+            <div class="value" id="graph-decision">-</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Exact LLM Response Text</h2>
+        <div class="grid">
+          <article>
+            <div class="sub">Normal LangChain: <code>normal_langchain_response.answer</code></div>
+            <pre id="linear-answer" class="exact">-</pre>
+          </article>
+          <article>
+            <div class="sub">LangGraph: <code>langgraph_state_response.final_answer</code></div>
+            <pre id="graph-answer" class="exact">-</pre>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Visualization</h2>
+        <div class="viz-grid">
+          <article class="viz-card">
+            <div class="sub">Metric Bars</div>
+            <div class="legend">
+              <span><i class="legend-dot linear"></i>Normal LangChain</span>
+              <span><i class="legend-dot graph"></i>LangGraph</span>
+            </div>
+
+            <div class="metric-row">
+              <div class="metric-name">Citations</div>
+              <div class="metric-tracks">
+                <div class="track">
+                  <div id="citations-linear-bar" class="bar linear"></div>
+                  <span id="citations-linear-label">0</span>
+                </div>
+                <div class="track">
+                  <div id="citations-graph-bar" class="bar graph"></div>
+                  <span id="citations-graph-label">0</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="metric-row">
+              <div class="metric-name">Audit Events</div>
+              <div class="metric-tracks">
+                <div class="track">
+                  <div id="audit-linear-bar" class="bar linear"></div>
+                  <span id="audit-linear-label">0</span>
+                </div>
+                <div class="track">
+                  <div id="audit-graph-bar" class="bar graph"></div>
+                  <span id="audit-graph-label">0</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="metric-row">
+              <div class="metric-name">Attempts</div>
+              <div class="metric-tracks">
+                <div class="track">
+                  <div id="attempts-linear-bar" class="bar linear"></div>
+                  <span id="attempts-linear-label">1</span>
+                </div>
+                <div class="track">
+                  <div id="attempts-graph-bar" class="bar graph"></div>
+                  <span id="attempts-graph-label">0</span>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="viz-card">
+            <div class="sub">LangGraph Executed Path</div>
+            <div id="timeline" class="timeline"></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Control-Flow Difference</h2>
+        <div class="grid">
+          <article>
+            <div class="sub">Normal LangChain</div>
+            <pre id="linear-diff">-</pre>
+          </article>
+          <article>
+            <div class="sub">LangGraph Decision Path</div>
+            <pre id="graph-path" class="path">-</pre>
+          </article>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Raw JSON (Exact, Unmodified)</h2>
+        <div class="grid">
+          <article>
+            <div class="sub">normal_langchain_response</div>
+            <pre id="linear-raw">-</pre>
+          </article>
+          <article>
+            <div class="sub">langgraph_state_response</div>
+            <pre id="graph-raw">-</pre>
+          </article>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      const ids = {
+        input: document.getElementById("json-input"),
+        status: document.getElementById("status"),
+        question: document.getElementById("question"),
+        linearDecision: document.getElementById("linear-decision"),
+        graphDecision: document.getElementById("graph-decision"),
+        linearAnswer: document.getElementById("linear-answer"),
+        graphAnswer: document.getElementById("graph-answer"),
+        linearDiff: document.getElementById("linear-diff"),
+        graphPath: document.getElementById("graph-path"),
+        linearRaw: document.getElementById("linear-raw"),
+        graphRaw: document.getElementById("graph-raw"),
+        timeline: document.getElementById("timeline"),
+        bars: {
+          citationsLinear: document.getElementById("citations-linear-bar"),
+          citationsGraph: document.getElementById("citations-graph-bar"),
+          auditLinear: document.getElementById("audit-linear-bar"),
+          auditGraph: document.getElementById("audit-graph-bar"),
+          attemptsLinear: document.getElementById("attempts-linear-bar"),
+          attemptsGraph: document.getElementById("attempts-graph-bar"),
+        },
+        labels: {
+          citationsLinear: document.getElementById("citations-linear-label"),
+          citationsGraph: document.getElementById("citations-graph-label"),
+          auditLinear: document.getElementById("audit-linear-label"),
+          auditGraph: document.getElementById("audit-graph-label"),
+          attemptsLinear: document.getElementById("attempts-linear-label"),
+          attemptsGraph: document.getElementById("attempts-graph-label"),
+        },
+      };
+
+      function pretty(value) {
+        return JSON.stringify(value, null, 2);
+      }
+
+      function text(value) {
+        if (value === null || value === undefined) return "-";
+        if (typeof value === "string") return value;
+        return pretty(value);
+      }
+
+      function setStatus(message, isError = false) {
+        ids.status.textContent = message;
+        ids.status.classList.toggle("error", isError);
+      }
+
+      function toNumber(value, fallback = 0) {
+        const num = Number(value);
+        return Number.isFinite(num) ? num : fallback;
+      }
+
+      function setMetricBars(linearValue, graphValue, linearBar, graphBar, linearLabel, graphLabel) {
+        const left = toNumber(linearValue);
+        const right = toNumber(graphValue);
+        const max = Math.max(1, left, right);
+        linearBar.style.width = `${(left / max) * 100}%`;
+        graphBar.style.width = `${(right / max) * 100}%`;
+        linearLabel.textContent = String(left);
+        graphLabel.textContent = String(right);
+      }
+
+      function renderTimeline(pathValue) {
+        const canonical = [
+          "normalize",
+          "retrieve",
+          "answer_attempt_1",
+          "retry_answer",
+          "answer_attempt_2",
+          "policy_check",
+          "finalize",
+        ];
+        const path = Array.isArray(pathValue) ? pathValue : [];
+        const active = new Set(path.map((item) => String(item)));
+
+        ids.timeline.innerHTML = "";
+        canonical.forEach((step, index) => {
+          const chip = document.createElement("span");
+          chip.className = active.has(step) ? "step active" : "step";
+          chip.textContent = step;
+          ids.timeline.appendChild(chip);
+          if (index !== canonical.length - 1) {
+            const arrow = document.createElement("span");
+            arrow.className = "arrow";
+            arrow.textContent = "→";
+            ids.timeline.appendChild(arrow);
+          }
+        });
+      }
+
+      function render(payload) {
+        const shared = payload.shared_outcome || {};
+        const normal = payload.normal_langchain_response || {};
+        const graph = payload.langgraph_state_response || {};
+        const diff = payload.differences || {};
+
+        ids.question.textContent = text(shared.question);
+        ids.linearDecision.textContent = text(shared.linear_decision || normal.decision);
+        ids.graphDecision.textContent = text(shared.graph_decision || graph.final_decision);
+
+        ids.linearAnswer.textContent = text(normal.answer);
+        ids.graphAnswer.textContent = text(graph.final_answer);
+
+        ids.linearDiff.textContent = pretty(diff.normal_langchain || {});
+        const graphPath = (diff.langgraph || {}).decision_path || graph.decision_path;
+        ids.graphPath.textContent = text(graphPath);
+
+        ids.linearRaw.textContent = pretty(normal);
+        ids.graphRaw.textContent = pretty(graph);
+
+        setMetricBars(
+          (normal.citations || []).length,
+          (graph.citations || []).length,
+          ids.bars.citationsLinear,
+          ids.bars.citationsGraph,
+          ids.labels.citationsLinear,
+          ids.labels.citationsGraph
+        );
+        setMetricBars(
+          (normal.audit_events || []).length,
+          (graph.audit_events || []).length,
+          ids.bars.auditLinear,
+          ids.bars.auditGraph,
+          ids.labels.auditLinear,
+          ids.labels.auditGraph
+        );
+        setMetricBars(
+          1,
+          toNumber(graph.answer_attempt, 0),
+          ids.bars.attemptsLinear,
+          ids.bars.attemptsGraph,
+          ids.labels.attemptsLinear,
+          ids.labels.attemptsGraph
+        );
+        renderTimeline(graphPath);
+      }
+
+      document.getElementById("render-btn").addEventListener("click", () => {
+        const raw = ids.input.value.trim();
+        if (!raw) {
+          setStatus("Paste or load JSON first.", true);
+          return;
+        }
+        try {
+          const payload = JSON.parse(raw);
+          render(payload);
+          setStatus("Rendered successfully.");
+        } catch (err) {
+          setStatus(`Invalid JSON: ${err.message}`, true);
+        }
+      });
+
+      document.getElementById("clear-btn").addEventListener("click", () => {
+        ids.input.value = "";
+        [
+          ids.question,
+          ids.linearDecision,
+          ids.graphDecision,
+          ids.linearAnswer,
+          ids.graphAnswer,
+          ids.linearDiff,
+          ids.graphPath,
+          ids.linearRaw,
+          ids.graphRaw,
+        ].forEach((el) => {
+          el.textContent = "-";
+        });
+        ids.timeline.innerHTML = "";
+        setMetricBars(
+          0,
+          0,
+          ids.bars.citationsLinear,
+          ids.bars.citationsGraph,
+          ids.labels.citationsLinear,
+          ids.labels.citationsGraph
+        );
+        setMetricBars(
+          0,
+          0,
+          ids.bars.auditLinear,
+          ids.bars.auditGraph,
+          ids.labels.auditLinear,
+          ids.labels.auditGraph
+        );
+        setMetricBars(
+          0,
+          0,
+          ids.bars.attemptsLinear,
+          ids.bars.attemptsGraph,
+          ids.labels.attemptsLinear,
+          ids.labels.attemptsGraph
+        );
+        setStatus("Cleared.");
+      });
+
+      document.getElementById("file-input").addEventListener("change", async (event) => {
+        const file = event.target.files && event.target.files[0];
+        if (!file) return;
+        try {
+          ids.input.value = await file.text();
+          setStatus(`Loaded file: ${file.name}`);
+        } catch (err) {
+          setStatus(`Failed to read file: ${err.message}`, true);
+        }
+      });
+
+      renderTimeline([]);
+      setMetricBars(
+        0,
+        0,
+        ids.bars.citationsLinear,
+        ids.bars.citationsGraph,
+        ids.labels.citationsLinear,
+        ids.labels.citationsGraph
+      );
+      setMetricBars(
+        0,
+        0,
+        ids.bars.auditLinear,
+        ids.bars.auditGraph,
+        ids.labels.auditLinear,
+        ids.labels.auditGraph
+      );
+      setMetricBars(
+        0,
+        0,
+        ids.bars.attemptsLinear,
+        ids.bars.attemptsGraph,
+        ids.labels.attemptsLinear,
+        ids.labels.attemptsGraph
+      );
+    </script>
+  </body>
+</html>
