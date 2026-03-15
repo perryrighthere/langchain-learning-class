@@ -14,10 +14,11 @@ from compliance_bot.schemas.retrieval import (
     RetrievalFilters,
     RetrievedChunk,
 )
+from compliance_bot.schemas.tools import ToolExecutionRecord, ToolPlan
 
 
 class ComplianceAgentState(BaseModel):
-    """Deterministic state used by the Week 5 LangGraph workflow."""
+    """Deterministic state used by the Week 6 LangGraph workflow."""
 
     trace_id: str = Field(..., min_length=1)
     question: str = Field(..., min_length=1)
@@ -27,11 +28,15 @@ class ComplianceAgentState(BaseModel):
     retrieved_chunks: list[RetrievedChunk] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list)
     policy_flags: list[str] = Field(default_factory=list)
+    tool_plan: ToolPlan = Field(default_factory=ToolPlan)
+    tool_results: list[ToolExecutionRecord] = Field(default_factory=list)
+    tool_context: str = Field(default="")
     decision_path: list[str] = Field(default_factory=list)
     final_answer: str = Field(default="")
     final_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     final_decision: DecisionEnum = DecisionEnum.ABSTAINED
     abstention_reason: str | None = None
+    escalation_reason: str | None = None
     requires_human_review: bool = False
     provider_metrics: list[ProviderCallMetrics] = Field(default_factory=list)
     audit_events: list[AuditEvent] = Field(default_factory=list)

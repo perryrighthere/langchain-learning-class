@@ -1,4 +1,4 @@
-"""Week 5 audit replay tests."""
+"""Week 6 audit replay tests."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from compliance_bot.audit.replay import replay_audit_trace
 
 
 def test_replay_reconstructs_decision_path_from_workflow_stages() -> None:
-    trace_id = "trace-week5-replay-001"
+    trace_id = "trace-week6-replay-001"
     events = [
         emit_workflow_audit_event(
             trace_id=trace_id,
@@ -15,6 +15,20 @@ def test_replay_reconstructs_decision_path_from_workflow_stages() -> None:
             status="ok",
             input_payload={"question": "Who approves expense reimbursement?"},
             output_payload={"normalized_query": "who approves expense reimbursement"},
+        ),
+        emit_workflow_audit_event(
+            trace_id=trace_id,
+            stage="graph.tool_plan",
+            status="ok",
+            input_payload={"question": "who approves expense reimbursement"},
+            output_payload={"planned_tools": ["policy_registry_lookup"]},
+        ),
+        emit_workflow_audit_event(
+            trace_id=trace_id,
+            stage="graph.tools",
+            status="ok",
+            input_payload={"planned_tools": ["policy_registry_lookup"]},
+            output_payload={"tool_context_available": True},
         ),
         emit_workflow_audit_event(
             trace_id=trace_id,
@@ -40,9 +54,16 @@ def test_replay_reconstructs_decision_path_from_workflow_stages() -> None:
         ),
         emit_workflow_audit_event(
             trace_id=trace_id,
+            stage="graph.escalation",
+            status="ok",
+            input_payload={"tool_results": []},
+            output_payload={"requires_human_review": False},
+        ),
+        emit_workflow_audit_event(
+            trace_id=trace_id,
             stage="graph.finalize",
             status="ok",
-            input_payload={"decision_path_length": 4},
+            input_payload={"decision_path_length": 7},
             output_payload={"final_decision": "ANSWERED"},
         ),
     ]
@@ -50,12 +71,15 @@ def test_replay_reconstructs_decision_path_from_workflow_stages() -> None:
     replay = replay_audit_trace(events, trace_id=trace_id)
 
     assert replay.trace_id == trace_id
-    assert replay.total_events == 5
+    assert replay.total_events == 8
     assert replay.stage_counts["graph.answer"] == 1
     assert replay.decision_path == [
         "normalize",
+        "tool_plan",
+        "tools",
         "retrieve",
         "answer_attempt_1",
         "policy_check",
+        "escalation",
         "finalize",
     ]

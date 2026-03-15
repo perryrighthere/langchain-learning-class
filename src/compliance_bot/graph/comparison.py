@@ -1,4 +1,4 @@
-"""Week 5 teaching helper: compare normal LangChain vs LangGraph workflow."""
+"""Week 6 teaching helper: compare normal LangChain vs LangGraph workflow."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 from compliance_bot.audit.replay import replay_audit_trace
 from compliance_bot.chains.citation_chain import run_week4_query
-from compliance_bot.graph.workflow import run_week5_query
+from compliance_bot.graph.workflow import run_week6_query
 
 
 def comparison_workflow_diagram() -> str:
@@ -23,9 +23,10 @@ def comparison_workflow_diagram() -> str:
             "  question -> retrieval -> grounded_answer -> final_response",
             "",
             "LangGraph (state machine)",
-            "  question -> normalize -> retrieve -> answer -> policy_check -> finalize",
-            "                                 |",
-            "                                 +-> retry (on llm_timeout, bounded)",
+            "  question -> normalize -> tool_plan -> tools -> retrieve -> answer",
+            "                                                     |",
+            "                                                     +-> retry (on llm_timeout, bounded)",
+            "  answer -> policy_check -> escalation -> finalize",
             "  finalize -> replay(trace_id) -> decision_path",
         ]
     )
@@ -44,7 +45,7 @@ def run_week5_comparison(
     rerank_provider_mode: str = "auto",
     llm_provider_mode: str = "auto",
 ) -> dict[str, object]:
-    """Run one question through both Week 4 and Week 5 paths and summarize differences."""
+    """Run one question through both Week 4 and Week 6 paths and summarize differences."""
 
     linear = run_week4_query(
         manifest_path=manifest_path,
@@ -58,7 +59,7 @@ def run_week5_comparison(
         rerank_provider_mode=rerank_provider_mode,
         llm_provider_mode=llm_provider_mode,
     )
-    graph_state = run_week5_query(
+    graph_state = run_week6_query(
         manifest_path=manifest_path,
         question=question,
         jurisdiction=jurisdiction,
@@ -87,6 +88,8 @@ def run_week5_comparison(
             "has_retry_state": False,
             "has_replay_summary": False,
             "decision_path_available": False,
+            "has_tool_routing": False,
+            "has_escalation_node": False,
             "answer_attempt_count": 1,
         },
         "langgraph": {
@@ -94,6 +97,8 @@ def run_week5_comparison(
             "has_retry_state": True,
             "has_replay_summary": True,
             "decision_path_available": True,
+            "has_tool_routing": True,
+            "has_escalation_node": True,
             "answer_attempt_count": graph_state.answer_attempt,
             "decision_path": graph_state.decision_path,
             "replay_decision_path": replay.decision_path,
@@ -108,9 +113,15 @@ def run_week5_comparison(
     }
 
 
+def run_week6_comparison(**kwargs: object) -> dict[str, object]:
+    """Backward-compatible Week 6 alias for the comparison helper."""
+
+    return run_week5_comparison(**kwargs)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Compare Week 4 normal LangChain flow vs Week 5 LangGraph flow"
+        description="Compare Week 4 normal LangChain flow vs Week 6 LangGraph flow"
     )
     parser.add_argument(
         "--manifest-path",
@@ -154,10 +165,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    """CLI entrypoint for Week 5 comparison helper."""
+    """CLI entrypoint for Week 6 comparison helper."""
 
     args = _build_parser().parse_args()
-    payload = run_week5_comparison(
+    payload = run_week6_comparison(
         manifest_path=args.manifest_path,
         question=args.question,
         jurisdiction=args.jurisdiction,

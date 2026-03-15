@@ -13,9 +13,12 @@ from compliance_bot.schemas.audit import AuditEvent
 
 _STAGE_TO_PATH_STEP = {
     "graph.normalize": "normalize",
+    "graph.tool_plan": "tool_plan",
+    "graph.tools": "tools",
     "graph.retrieve": "retrieve",
     "graph.retry": "retry_answer",
     "graph.policy_check": "policy_check",
+    "graph.escalation": "escalation",
     "graph.finalize": "finalize",
 }
 
@@ -67,12 +70,12 @@ def replay_audit_trace(
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Replay Week 5 audit events by trace_id")
+    parser = argparse.ArgumentParser(description="Replay Week 6 audit events by trace_id")
     parser.add_argument(
         "--response-path",
         type=Path,
         required=True,
-        help="Path to a Week 5 workflow JSON response file",
+        help="Path to a Week 6 workflow JSON response file",
     )
     parser.add_argument(
         "--trace-id",

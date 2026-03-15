@@ -25,6 +25,19 @@ from compliance_bot.schemas.retrieval import (
     RetrievalFilters,
     RetrievalResponse,
 )
+from compliance_bot.schemas.tools import (
+    ExceptionLogLookupInput,
+    ExceptionLogLookupResult,
+    ExceptionLogRecord,
+    PolicyRegistryLookupInput,
+    PolicyRegistryLookupResult,
+    PolicyRegistryMatch,
+    TavilySearchInput,
+    TavilySearchResult,
+    TavilySearchSource,
+    ToolExecutionRecord,
+    ToolPlan,
+)
 
 __all__ = [
     "AuditEvent",
@@ -47,4 +60,15 @@ __all__ = [
     "RetrievalBenchmarkReport",
     "GroundedAnswerDraft",
     "GroundedAnswerResponse",
+    "ToolPlan",
+    "PolicyRegistryLookupInput",
+    "PolicyRegistryMatch",
+    "PolicyRegistryLookupResult",
+    "ExceptionLogRecord",
+    "ExceptionLogLookupInput",
+    "ExceptionLogLookupResult",
+    "TavilySearchInput",
+    "TavilySearchSource",
+    "TavilySearchResult",
+    "ToolExecutionRecord",
 ]

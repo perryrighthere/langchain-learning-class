@@ -1,4 +1,4 @@
-"""Week 5 comparison helper tests."""
+"""Week 6 comparison helper tests."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from compliance_bot.graph.comparison import comparison_workflow_diagram, run_wee
 
 def _write_manifest(path: Path) -> None:
     manifest_payload = {
-        "version_tag": "week-05-v1",
+        "version_tag": "week-06-v1",
         "manifest_hash": "a" * 64,
         "doc_count": 1,
         "chunk_count": 1,
@@ -23,7 +23,7 @@ def _write_manifest(path: Path) -> None:
             {
                 "chunk_id": "chunk-expense-0001",
                 "doc_id": "expense-policy-v1",
-                "version_tag": "week-05-v1",
+                "version_tag": "week-06-v1",
                 "chunk_index": 0,
                 "content": (
                     "Expense reimbursement requires manager approval with receipt evidence."
@@ -39,8 +39,8 @@ def _write_manifest(path: Path) -> None:
     path.write_text(json.dumps(manifest_payload), encoding="utf-8")
 
 
-def test_week5_comparison_reports_graph_specific_capabilities(tmp_path: Path) -> None:
-    manifest_path = tmp_path / "manifest-week-05-v1.json"
+def test_week6_comparison_reports_graph_specific_capabilities(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "manifest-week-06-v1.json"
     _write_manifest(manifest_path)
 
     payload = run_week5_comparison(
@@ -58,6 +58,8 @@ def test_week5_comparison_reports_graph_specific_capabilities(tmp_path: Path) ->
     assert payload["shared_outcome"]["graph_decision"] == "ANSWERED"
     assert payload["differences"]["normal_langchain"]["decision_path_available"] is False
     assert payload["differences"]["langgraph"]["decision_path_available"] is True
+    assert payload["differences"]["langgraph"]["has_tool_routing"] is True
+    assert payload["differences"]["langgraph"]["has_escalation_node"] is True
     assert payload["differences"]["langgraph"]["decision_path"] == payload["differences"][
         "langgraph"
     ]["replay_decision_path"]
@@ -68,3 +70,5 @@ def test_comparison_workflow_diagram_mentions_both_modes() -> None:
     assert "Normal LangChain" in diagram
     assert "LangGraph" in diagram
     assert "retry" in diagram
+    assert "tool_plan" in diagram
+    assert "escalation" in diagram
