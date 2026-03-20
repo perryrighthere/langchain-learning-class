@@ -13,6 +13,7 @@ class RetrievalFilters(BaseModel):
 
     jurisdiction: str | None = None
     policy_scope: list[str] = Field(default_factory=list)
+    user_role: str | None = None
 
     @field_validator("jurisdiction")
     @classmethod
@@ -33,6 +34,14 @@ class RetrievalFilters(BaseModel):
                 normalized.append(token)
                 seen.add(token)
         return normalized
+
+    @field_validator("user_role")
+    @classmethod
+    def normalize_user_role(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        return normalized or None
 
 
 class QueryRewriteOutput(BaseModel):

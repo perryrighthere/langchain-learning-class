@@ -11,6 +11,10 @@ def apply_escalation_policy(state: ComplianceAgentState) -> ComplianceAgentState
     """Escalate unresolved, high-risk, or tool-degraded requests to human review."""
 
     escalation_reasons: list[str] = []
+    if "prompt_injection_detected" in state.policy_flags:
+        escalation_reasons.append("prompt_injection_detected")
+    if "role_access_denied" in state.policy_flags:
+        escalation_reasons.append("access_denied")
     if state.tool_plan.high_risk:
         escalation_reasons.append("high_risk_intent")
     if any(not result.resolved for result in state.tool_results):

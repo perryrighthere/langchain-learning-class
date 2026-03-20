@@ -1,4 +1,0 @@
-interface:
-  display_name: "LangChain Teaching Coach"
-  short_description: "Teach LangChain concepts with clear project grounding."
-  default_prompt: "Use $langchain-teaching-coach to explain this feature with a concise example, create docs/teaching-scripts/week-XX.md (goal + Mermaid architecture + detailed technical teaching), include a Week N homework section, and add a test checklist."

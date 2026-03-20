@@ -1,12 +1,13 @@
 # LangChain Compliance Bot
 
-Week 1-6 implementation of a compliance Q&A foundation:
+Week 1-7 implementation of a compliance Q&A foundation:
 - Week 1: baseline LCEL chain with structured output.
 - Week 2: deterministic ingestion pipeline with metadata governance and corpus manifest versioning.
 - Week 3: practical provider-backed retrieval foundation (SiliconFlow-first embedding/rerank) with safe fallback, decisions, and benchmark gates.
 - Week 4: citation-first grounded answer generation with strict citation validation, controlled abstention/escalation, and answer-stage audit events.
 - Week 5: LangGraph state-machine orchestration with deterministic decision paths, retry routing, and replayable audit traces.
 - Week 6: real LangChain tool-calling with policy registry lookup, exception-log review, deterministic fallback, and explicit human escalation in LangGraph.
+- Week 7: role-aware retrieval guardrails, prompt-injection blocking, and PII redaction for model-facing inputs and final workflow outputs.
 
 ## Code Structure
 
@@ -16,15 +17,18 @@ Week 1-6 implementation of a compliance Q&A foundation:
 - `src/compliance_bot/schemas/retrieval.py`: Week 3 schemas for filters, query rewrite output, citations, retrieval responses, and benchmark reports.
 - `src/compliance_bot/schemas/answer.py`: Week 4 grounded answer draft/response schemas.
 - `src/compliance_bot/schemas/tools.py`: Week 6 tool routing, tool I/O, and execution summary schemas.
+- `src/compliance_bot/guardrails/rbac_filter.py`: Week 7 role-aware policy-scope enforcement before retrieval.
+- `src/compliance_bot/guardrails/injection_detector.py`: Week 7 prompt-injection detection and refusal policy.
+- `src/compliance_bot/guardrails/pii_redactor.py`: Week 7 input/output redaction for common sensitive-text patterns.
 - `src/compliance_bot/chains/baseline_chain.py`: Baseline prompt + model + structured parser pipeline.
 - `src/compliance_bot/chains/abstention_policy.py`: Week 4 deterministic abstention/escalation and grounding policy checks.
 - `src/compliance_bot/chains/citation_chain.py`: Week 4 citation-first answer chain, grounding validation, and CLI workflow.
 - `src/compliance_bot/tools/policy_registry_tool.py`: Week 6 local policy registry LangChain tool.
 - `src/compliance_bot/tools/exception_log_tool.py`: Week 6 local exception-log LangChain tool.
 - `src/compliance_bot/tools/tavily_search_tool.py`: Week 6 optional Tavily-backed real-time web search tool.
-- `src/compliance_bot/graph/state.py`: Week 6 `ComplianceAgentState` for deterministic LangGraph state.
+- `src/compliance_bot/graph/state.py`: Week 7 `ComplianceAgentState` with sanitized-question tracking for deterministic LangGraph state.
 - `src/compliance_bot/graph/escalation_node.py`: Week 6 escalation policy for high-risk or unresolved runs.
-- `src/compliance_bot/graph/workflow.py`: Week 6 LangGraph workflow with model-driven tool calls, deterministic fallback, retry routing, and escalation.
+- `src/compliance_bot/graph/workflow.py`: Week 7 LangGraph workflow with model-driven tool calls, RBAC guardrails, prompt-injection blocking, output redaction, retry routing, and escalation.
 - `src/compliance_bot/graph/comparison.py`: Week 6 side-by-side runner for normal LangChain flow vs LangGraph flow.
 - `src/compliance_bot/audit/events.py`: Workflow audit event helper.
 - `src/compliance_bot/audit/replay.py`: Audit replay summary builder and CLI.
@@ -48,25 +52,30 @@ Week 1-6 implementation of a compliance Q&A foundation:
 - `docs/week-04-requirements.md`: Week 4 scope, acceptance criteria, and risk register.
 - `docs/week-05-requirements.md`: Week 5 scope, acceptance criteria, and risk register.
 - `docs/week-06-requirements.md`: Week 6 scope, acceptance criteria, and risk register.
+- `docs/week-07-requirements.md`: Week 7 scope, acceptance criteria, and risk register.
 - `docs/benchmarks/week-03-cases.example.json`: Example retrieval benchmark case file.
 - `docs/benchmarks/week-04-failure-cases.md`: Week 4 grounding failure examples catalog.
 - `docs/frontend/week-05-comparison-viewer.html`: Static frontend viewer for Week 5 comparison JSON.
 - `docs/policies/sanitized/exception-log-week-06.json`: Sanitized exception-log sample for Week 6 workflow runs.
+- `docs/policies/sanitized/exception-log-week-07.json`: Sanitized exception-log sample for Week 7 workflow runs.
 - `docs/homework/week-02.md`: Week 2 homework brief and acceptance checklist.
 - `docs/homework/week-03.md`: Week 3 homework brief and acceptance checklist.
 - `docs/homework/week-04.md`: Week 4 homework brief and acceptance checklist.
 - `docs/homework/week-05.md`: Week 5 homework brief and acceptance checklist.
 - `docs/homework/week-06.md`: Week 6 homework brief and acceptance checklist.
+- `docs/homework/week-07.md`: Week 7 homework brief and acceptance checklist.
 - `docs/teaching-scripts/week-02.md`: Week 2 teaching script.
 - `docs/teaching-scripts/week-03.md`: Week 3 teaching script.
 - `docs/teaching-scripts/week-04.md`: Week 4 teaching script.
 - `docs/teaching-scripts/week-05.md`: Week 5 teaching script.
 - `docs/teaching-scripts/week-06.md`: Week 6 teaching script.
+- `docs/teaching-scripts/week-07.md`: Week 7 teaching script.
 - `tests/chains/test_baseline_chain.py`: Parseability and abstention behavior tests.
 - `tests/chains/test_citation_chain.py`: Week 4 citation validation, abstention, escalation, and fallback tests.
+- `tests/guardrails/test_guardrails.py`: Week 7 RBAC, injection-detection, and PII-redaction unit tests.
 - `tests/tools/test_policy_registry_tool.py`: Week 6 policy registry tool tests.
 - `tests/tools/test_exception_log_tool.py`: Week 6 exception-log tool tests.
-- `tests/graph/test_workflow.py`: Week 6 graph orchestration, degraded-tool handling, retry continuity, and replay integrity tests.
+- `tests/graph/test_workflow.py`: Week 7 graph orchestration, degraded-tool handling, role restrictions, injection blocking, redaction, retry continuity, and replay integrity tests.
 - `tests/graph/test_comparison.py`: Week 6 side-by-side comparison behavior test.
 - `tests/audit/test_replay.py`: Week 6 audit replay reconstruction tests.
 - `tests/ingestion/test_metadata_validator.py`: Week 2 metadata validation tests.
@@ -191,22 +200,39 @@ PYTHONPATH=src .venv/bin/python -m compliance_bot.chains.citation_chain \
   --llm-provider siliconflow
 ```
 
-## Run Week 6 LangGraph Workflow
+## Run Week 7 Guardrailed LangGraph Workflow
 
-Use a Week 2 manifest to run tool-calling, local tool execution, optional real-time web search, retrieval, grounded answering, and escalation through the Week 6 state machine.
+Use a Week 2 manifest to run tool-calling, local tool execution, optional real-time web search, role-aware retrieval, prompt guardrails, grounded answering, redaction, and escalation through the Week 7 state machine.
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m compliance_bot.graph.workflow \
   --manifest-path artifacts/corpus/manifest-week-02-v1.json \
   --question "Who approves expense reimbursement requests?" \
   --jurisdiction US \
+  --user-role employee \
   --policy-scope expense \
   --embedding-provider none \
   --rerank-provider none \
   --llm-provider none \
   --max-answer-retries 1 \
-  --tool-timeout-ms 250 \
-  --exception-log-path docs/policies/sanitized/exception-log-week-06.json
+  --tool-timeout-ms 5000 \
+  --exception-log-path docs/policies/sanitized/exception-log-week-07.json
+```
+
+To see role blocking behavior:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m compliance_bot.graph.workflow \
+  --manifest-path artifacts/corpus/manifest-week-02-v1.json \
+  --question "Can I share vendor data with the processor?" \
+  --jurisdiction US \
+  --user-role employee \
+  --policy-scope vendor \
+  --embedding-provider none \
+  --rerank-provider none \
+  --llm-provider none \
+  --tool-timeout-ms 5000 \
+  --exception-log-path docs/policies/sanitized/exception-log-week-07.json
 ```
 
 To force SiliconFlow provider mode for retrieval, real tool-calling, and answering:
@@ -220,12 +246,13 @@ PYTHONPATH=src .venv/bin/python -m compliance_bot.graph.workflow \
   --manifest-path artifacts/corpus/manifest-week-02-v1.json \
   --question "Who approves expense reimbursement requests?" \
   --jurisdiction US \
+  --user-role compliance_analyst \
   --policy-scope expense \
   --embedding-provider siliconflow \
   --rerank-provider siliconflow \
   --llm-provider siliconflow \
-  --tool-timeout-ms 250 \
-  --exception-log-path docs/policies/sanitized/exception-log-week-06.json
+  --tool-timeout-ms 5000 \
+  --exception-log-path docs/policies/sanitized/exception-log-week-07.json
 ```
 
 To enable real-time web search for latest/current questions, also configure Tavily:
@@ -241,12 +268,13 @@ PYTHONPATH=src .venv/bin/python -m compliance_bot.graph.workflow \
   --manifest-path artifacts/corpus/manifest-week-02-v1.json \
   --question "What is the latest public guidance on expense reimbursement approvals?" \
   --jurisdiction US \
+  --user-role compliance_analyst \
   --policy-scope expense \
   --embedding-provider siliconflow \
   --rerank-provider siliconflow \
   --llm-provider siliconflow \
-  --tool-timeout-ms 250 \
-  --exception-log-path docs/policies/sanitized/exception-log-week-06.json
+  --tool-timeout-ms 5000 \
+  --exception-log-path docs/policies/sanitized/exception-log-week-07.json
 ```
 
 Replay a saved Week 6 response by `trace_id`:
@@ -273,7 +301,7 @@ PYTHONPATH=src .venv/bin/python -m compliance_bot.graph.comparison \
 The comparison CLI prints an ASCII workflow diagram before the JSON payload.
 Use `--json-only` when you need machine-parseable JSON output.
 
-## Run Comparison Viewer
+## Run Workflow Viewer
 
 1. Generate comparison output JSON (SiliconFlow example):
 
@@ -302,9 +330,9 @@ python3 -m http.server 8000
 3. Open:
 - `http://localhost:8000/docs/frontend/week-05-comparison-viewer.html`
 
-4. Load `artifacts/week6-comparison-siliconflow.json` in the page.
+4. Load `artifacts/week6-comparison-siliconflow.json` in the page, or paste direct JSON from `compliance_bot.graph.workflow`.
 
 The page shows:
-- exact normal-flow response text: `normal_langchain_response.answer`
-- exact LangGraph response text: `langgraph_state_response.final_answer`
-- full unmodified raw JSON blocks for both responses
+- each logic chain's result in a simple side-by-side layout
+- LangGraph tool-use chain, tool context, retrieved context, and human review
+- full unmodified raw JSON blocks for inspection

@@ -19,7 +19,7 @@ from compliance_bot.schemas.tools import (
 
 DEFAULT_TAVILY_BASE_URL = "https://api.tavily.com/search"
 DEFAULT_TAVILY_TOPIC = "general"
-DEFAULT_TAVILY_SEARCH_DEPTH = "advanced"
+DEFAULT_TAVILY_SEARCH_DEPTH = "basic"
 DEFAULT_TAVILY_TIMEOUT_SECONDS = 10.0
 DEFAULT_TAVILY_MAX_RESULTS = 3
 
@@ -82,6 +82,24 @@ def _default_request(
         return json.loads(response.read().decode("utf-8"))
 
 
+def _coerce_time_range(
+    *,
+    time_range: str | None,
+    days: int | None,
+) -> str | None:
+    if time_range is not None:
+        return time_range
+    if days is None:
+        return None
+    if days <= 1:
+        return "day"
+    if days <= 7:
+        return "week"
+    if days <= 31:
+        return "month"
+    return "year"
+
+
 def search_tavily(
     tool_input: TavilySearchInput,
     *,
@@ -97,8 +115,9 @@ def search_tavily(
         "max_results": tool_input.max_results,
         "include_answer": True,
     }
-    if tool_input.days is not None:
-        payload["days"] = tool_input.days
+    time_range = _coerce_time_range(time_range=tool_input.time_range, days=tool_input.days)
+    if time_range is not None:
+        payload["time_range"] = time_range
 
     headers = {
         "Authorization": f"Bearer {config.api_key}",
@@ -109,7 +128,17 @@ def search_tavily(
         raw = caller(config.base_url, headers, payload, config.timeout_seconds)
     except TimeoutError as exc:
         raise TimeoutError("tavily search timed out") from exc
-    except (HTTPError, URLError, OSError) as exc:
+    except HTTPError as exc:
+        response_body = ""
+        try:
+            response_body = exc.read().decode("utf-8").strip()
+        except Exception:
+            response_body = ""
+        detail = f"HTTP Error {exc.code}: {exc.reason}"
+        if response_body:
+            detail = f"{detail}: {response_body}"
+        raise RuntimeError(f"tavily search failed: {detail}") from exc
+    except (URLError, OSError) as exc:
         raise RuntimeError(f"tavily search failed: {exc}") from exc
 
     raw_results = raw.get("results", [])
@@ -182,6 +211,7 @@ def build_tavily_search_tool(
         topic: str = DEFAULT_TAVILY_TOPIC,
         max_results: int = DEFAULT_TAVILY_MAX_RESULTS,
         search_depth: str = DEFAULT_TAVILY_SEARCH_DEPTH,
+        time_range: str | None = None,
         days: int | None = None,
     ) -> dict[str, Any]:
         result = search_tavily(
@@ -190,6 +220,7 @@ def build_tavily_search_tool(
                 topic=topic,
                 max_results=max_results,
                 search_depth=search_depth,
+                time_range=time_range,
                 days=days,
             ),
             config=resolved_config,

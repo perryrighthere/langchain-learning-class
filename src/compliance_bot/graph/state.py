@@ -23,6 +23,7 @@ class ComplianceAgentState(BaseModel):
     trace_id: str = Field(..., min_length=1)
     question: str = Field(..., min_length=1)
     normalized_query: str = Field(default="", min_length=0)
+    sanitized_question: str = Field(default="", min_length=0)
     retrieval_filters: RetrievalFilters = Field(default_factory=RetrievalFilters)
     retrieval_decision: DecisionEnum = DecisionEnum.ABSTAINED
     retrieved_chunks: list[RetrievedChunk] = Field(default_factory=list)

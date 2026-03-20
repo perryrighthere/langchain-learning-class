@@ -1,0 +1,18 @@
+[
+  {
+    "exception_id": "exc-vendor-001",
+    "jurisdiction": "eu",
+    "policy_scope": "vendor",
+    "status": "open",
+    "owner": "compliance-ops",
+    "summary": "Vendor onboarding exception requires legal and privacy review before approval."
+  },
+  {
+    "exception_id": "exc-expense-002",
+    "jurisdiction": "us",
+    "policy_scope": "expense",
+    "status": "closed",
+    "owner": "finance-controls",
+    "summary": "Travel receipt exception was resolved after director approval."
+  }
+]

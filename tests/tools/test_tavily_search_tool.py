@@ -54,7 +54,7 @@ def test_search_tavily_maps_results_into_schema() -> None:
             topic="news",
             max_results=1,
             search_depth="advanced",
-            days=7,
+            time_range="week",
         ),
         config=TavilySearchConfig(api_key="test-key"),
         request_fn=_request,
@@ -71,12 +71,47 @@ def test_search_tavily_maps_results_into_schema() -> None:
         "search_depth": "advanced",
         "max_results": 1,
         "include_answer": True,
-        "days": 7,
+        "time_range": "week",
     }
     assert result.resolved is True
     assert result.topic == "news"
     assert result.answer == "The latest public guidance still requires manager approval."
     assert result.sources[0].url == "https://example.com/expense-update"
+
+
+def test_search_tavily_maps_legacy_days_input_to_time_range() -> None:
+    captured: dict[str, object] = {}
+
+    def _request(
+        url: str,
+        headers: dict[str, str],
+        payload: dict[str, object],
+        timeout: float,
+    ) -> dict[str, object]:
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["payload"] = payload
+        captured["timeout"] = timeout
+        return {"answer": None, "results": []}
+
+    search_tavily(
+        TavilySearchInput(
+            question="What changed this week?",
+            topic="news",
+            days=7,
+        ),
+        config=TavilySearchConfig(api_key="test-key"),
+        request_fn=_request,
+    )
+
+    assert captured["payload"] == {
+        "query": "What changed this week?",
+        "topic": "news",
+        "search_depth": "basic",
+        "max_results": 3,
+        "include_answer": True,
+        "time_range": "week",
+    }
 
 
 def test_search_tavily_returns_unresolved_when_no_results() -> None:

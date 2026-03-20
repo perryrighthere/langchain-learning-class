@@ -5,23 +5,31 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Mapping, TypeVar
 
+from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import Runnable
+from langchain_core.runnables import Runnable, RunnableLambda
 from langchain_core.tools import BaseTool
 
 from compliance_bot.audit.events import emit_workflow_audit_event
 from compliance_bot.audit.replay import replay_audit_trace
-from compliance_bot.chains.abstention_policy import DEFAULT_ABSTAIN_ANSWER
+from compliance_bot.chains.abstention_policy import DEFAULT_ABSTAIN_ANSWER, DEFAULT_ESCALATE_ANSWER
 from compliance_bot.chains.citation_chain import (
     build_citation_answer_chain,
     run_citation_answer,
     resolve_answer_llm,
+)
+from compliance_bot.guardrails import (
+    DEFAULT_GUARDRAIL_REFUSAL_ANSWER,
+    apply_role_access_policy,
+    detect_prompt_injection,
+    redact_sensitive_text,
 )
 from compliance_bot.graph.escalation_node import apply_escalation_policy
 from compliance_bot.graph.state import ComplianceAgentState
@@ -37,7 +45,7 @@ from compliance_bot.retrieval.retriever import (
     run_retrieval,
 )
 from compliance_bot.schemas.answer import GroundedAnswerDraft
-from compliance_bot.schemas.query import DecisionEnum
+from compliance_bot.schemas.query import BaselineChainOutput, DecisionEnum
 from compliance_bot.schemas.retrieval import RetrievalFilters, RetrievalResponse
 from compliance_bot.schemas.tools import (
     ExceptionLogLookupInput,
@@ -123,6 +131,28 @@ _REALTIME_TERMS = {
     "sanction",
 }
 
+_ALLOWED_TAVILY_TOPICS = {"general", "news", "finance"}
+_ALLOWED_TAVILY_SEARCH_DEPTHS = {"basic", "advanced", "fast", "ultra-fast"}
+_TIME_RANGE_ALIASES = {
+    "d": "day",
+    "day": "day",
+    "today": "day",
+    "daily": "day",
+    "w": "week",
+    "week": "week",
+    "weekly": "week",
+    "latest": "week",
+    "recent": "week",
+    "recently": "week",
+    "current": "week",
+    "m": "month",
+    "month": "month",
+    "monthly": "month",
+    "y": "year",
+    "year": "year",
+    "yearly": "year",
+}
+
 
 @dataclass(frozen=True)
 class Week6WorkflowRuntime:
@@ -142,6 +172,10 @@ class Week6WorkflowRuntime:
     llm_provider: str
     llm_model: str
     tool_timeout_ms: int
+
+
+def _effective_question(state: ComplianceAgentState) -> str:
+    return state.sanitized_question or state.normalized_query or state.question
 
 
 def _append_policy_flag(state: ComplianceAgentState, flag: str) -> None:
@@ -255,6 +289,27 @@ def _coerce_policy_scope(value: object, *, fallback: list[str]) -> list[str]:
     return list(fallback)
 
 
+def _normalize_tavily_topic(value: object) -> str:
+    candidate = " ".join(str(value or "").split()).lower()
+    if candidate in _ALLOWED_TAVILY_TOPICS:
+        return candidate
+    return "general"
+
+
+def _normalize_tavily_search_depth(value: object) -> str:
+    candidate = " ".join(str(value or "").split()).lower()
+    if candidate in _ALLOWED_TAVILY_SEARCH_DEPTHS:
+        return candidate
+    return "basic"
+
+
+def _normalize_tavily_time_range(value: object) -> str | None:
+    candidate = " ".join(str(value or "").split()).lower()
+    if not candidate:
+        return None
+    return _TIME_RANGE_ALIASES.get(candidate)
+
+
 def _tool_plan_from_tool_calls(
     *,
     question: str,
@@ -310,15 +365,28 @@ def _normalize_node(raw_state: dict[str, Any]) -> dict[str, object]:
     if not normalized_query:
         raise ValueError("question must not be blank")
 
-    state.normalized_query = normalized_query
+    sanitized_question = redact_sensitive_text(normalized_query)
+    state.question = sanitized_question.redacted_text
+    state.normalized_query = sanitized_question.redacted_text
+    state.sanitized_question = sanitized_question.redacted_text
+    if sanitized_question.applied_labels:
+        _append_policy_flag(state, "input_pii_redacted")
     state.decision_path.append("normalize")
     state.audit_events.append(
         emit_workflow_audit_event(
             trace_id=state.trace_id,
             stage="graph.normalize",
             status="ok",
-            input_payload={"question": state.question},
-            output_payload={"normalized_query": state.normalized_query},
+            input_payload={"question": state.sanitized_question},
+            output_payload={
+                "normalized_query": state.normalized_query,
+                "sanitized_question": state.sanitized_question,
+            },
+            metadata={
+                "input_redaction_labels": ",".join(sanitized_question.applied_labels)
+                if sanitized_question.applied_labels
+                else None,
+            },
         )
     )
     return state.as_graph_state()
@@ -327,10 +395,34 @@ def _normalize_node(raw_state: dict[str, Any]) -> dict[str, object]:
 def _build_tool_plan_node(runtime: Week6WorkflowRuntime):
     def _tool_plan_node(raw_state: dict[str, Any]) -> dict[str, object]:
         state = ComplianceAgentState.from_graph_state(raw_state)
+        state.retrieval_filters, access_decision = apply_role_access_policy(state.retrieval_filters)
+        injection_result = detect_prompt_injection(state.normalized_query or state.question)
         router_status = "ok"
-        if runtime.tool_router is None:
+        if access_decision.blocked:
+            plan = ToolPlan(
+                planned_tools=[],
+                tool_arguments={},
+                high_risk=True,
+                rationale=access_decision.rationale,
+                router_mode="guardrail",
+            )
+            router_status = "blocked"
+            _append_policy_flag(state, "role_access_denied")
+        elif injection_result.blocked:
+            plan = ToolPlan(
+                planned_tools=[],
+                tool_arguments={},
+                high_risk=True,
+                rationale=injection_result.rationale,
+                router_mode="guardrail",
+            )
+            router_status = "blocked"
+            _append_policy_flag(state, "prompt_injection_detected")
+            for matched_rule in injection_result.matched_rules:
+                _append_policy_flag(state, matched_rule)
+        elif runtime.tool_router is None:
             plan = _heuristic_tool_plan(
-                question=state.normalized_query or state.question,
+                question=_effective_question(state),
                 retrieval_filters=state.retrieval_filters,
                 realtime_search_available=runtime.tavily_search_tool is not None,
             )
@@ -338,19 +430,19 @@ def _build_tool_plan_node(runtime: Week6WorkflowRuntime):
             try:
                 planner_output = runtime.tool_router.invoke(
                     {
-                        "question": state.normalized_query or state.question,
+                        "question": _effective_question(state),
                         "jurisdiction": state.retrieval_filters.jurisdiction or "any",
                         "policy_scope": ", ".join(state.retrieval_filters.policy_scope) or "none",
                     }
                 )
                 plan = _tool_plan_from_tool_calls(
-                    question=state.normalized_query or state.question,
+                    question=_effective_question(state),
                     retrieval_filters=state.retrieval_filters,
                     planner_output=planner_output,
                 )
             except Exception:
                 plan = _heuristic_tool_plan(
-                    question=state.normalized_query or state.question,
+                    question=_effective_question(state),
                     retrieval_filters=state.retrieval_filters,
                     realtime_search_available=runtime.tavily_search_tool is not None,
                 )
@@ -361,6 +453,10 @@ def _build_tool_plan_node(runtime: Week6WorkflowRuntime):
         state.decision_path.append("tool_plan")
         if plan.high_risk:
             _append_policy_flag(state, "high_risk_intent")
+        if access_decision.denied_policy_scope:
+            _append_policy_flag(state, "role_scope_limited")
+        if not state.retrieval_filters.policy_scope:
+            _append_policy_flag(state, "role_scope_empty")
 
         state.audit_events.append(
             emit_workflow_audit_event(
@@ -368,7 +464,7 @@ def _build_tool_plan_node(runtime: Week6WorkflowRuntime):
                 stage="graph.tool_plan",
                 status=router_status,
                 input_payload={
-                    "question": state.normalized_query or state.question,
+                    "question": _effective_question(state),
                     "filters": state.retrieval_filters.model_dump(),
                 },
                 output_payload={
@@ -380,6 +476,11 @@ def _build_tool_plan_node(runtime: Week6WorkflowRuntime):
                 metadata={
                     "router_mode": plan.router_mode,
                     "router_status": router_status,
+                    "user_role": access_decision.user_role,
+                    "allowed_policy_scope": ",".join(access_decision.allowed_policy_scope),
+                    "denied_policy_scope": ",".join(access_decision.denied_policy_scope),
+                    "injection_blocked": str(injection_result.blocked).lower(),
+                    "injection_rules": ",".join(injection_result.matched_rules),
                     "llm_provider": runtime.llm_provider if runtime.tool_router is not None else "heuristic",
                     "llm_model": runtime.llm_model if runtime.tool_router is not None else "heuristic",
                 },
@@ -398,10 +499,10 @@ def _invoke_tool_with_timeout(
     timeout_ms: int,
 ) -> tuple[TToolResult | None, ToolExecutionRecord]:
     start = perf_counter()
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(tool.invoke, tool_input.model_dump(mode="python"))
     try:
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(tool.invoke, tool_input.model_dump(mode="python"))
-            raw_result = future.result(timeout=timeout_ms / 1000.0)
+        raw_result = future.result(timeout=timeout_ms / 1000.0)
         elapsed_ms = (perf_counter() - start) * 1000.0
         result = output_model.model_validate(raw_result)
         return (
@@ -416,6 +517,8 @@ def _invoke_tool_with_timeout(
             ),
         )
     except FuturesTimeoutError:
+        future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
         elapsed_ms = (perf_counter() - start) * 1000.0
         return (
             None,
@@ -430,6 +533,7 @@ def _invoke_tool_with_timeout(
             ),
         )
     except Exception as exc:
+        executor.shutdown(wait=False, cancel_futures=True)
         elapsed_ms = (perf_counter() - start) * 1000.0
         return (
             None,
@@ -443,6 +547,9 @@ def _invoke_tool_with_timeout(
                 requires_human_review=True,
             ),
         )
+    finally:
+        if not future.cancelled():
+            executor.shutdown(wait=False, cancel_futures=False)
 
 
 def _build_policy_registry_input(
@@ -451,7 +558,7 @@ def _build_policy_registry_input(
     raw_args: dict[str, object],
 ) -> PolicyRegistryLookupInput:
     return PolicyRegistryLookupInput(
-        question=str(raw_args.get("question") or state.normalized_query or state.question),
+        question=str(raw_args.get("question") or _effective_question(state)),
         jurisdiction=(
             str(raw_args["jurisdiction"])
             if raw_args.get("jurisdiction") not in {None, ""}
@@ -475,7 +582,7 @@ def _build_exception_log_input(
     raw_args: dict[str, object],
 ) -> ExceptionLogLookupInput:
     return ExceptionLogLookupInput(
-        question=str(raw_args.get("question") or state.normalized_query or state.question),
+        question=str(raw_args.get("question") or _effective_question(state)),
         jurisdiction=(
             str(raw_args["jurisdiction"])
             if raw_args.get("jurisdiction") not in {None, ""}
@@ -494,11 +601,24 @@ def _build_tavily_search_input(
     raw_args: dict[str, object],
 ) -> TavilySearchInput:
     return TavilySearchInput(
-        question=str(raw_args.get("question") or state.normalized_query or state.question),
-        topic=str(raw_args.get("topic") or "general"),
+        question=str(raw_args.get("question") or _effective_question(state)),
+        topic=_normalize_tavily_topic(raw_args.get("topic")),
         max_results=int(raw_args.get("max_results") or 3),
-        search_depth=str(raw_args.get("search_depth") or "advanced"),
+        search_depth=_normalize_tavily_search_depth(raw_args.get("search_depth")),
+        time_range=_normalize_tavily_time_range(raw_args.get("time_range")),
         days=int(raw_args["days"]) if raw_args.get("days") is not None else None,
+    )
+
+
+def _tool_input_build_failed(tool_name: str, exc: Exception) -> ToolExecutionRecord:
+    return ToolExecutionRecord(
+        tool_name=tool_name,
+        status="error",
+        latency_ms=0.0,
+        resolved=False,
+        summary=f"{tool_name} input validation failed: {exc}",
+        error_code="tool_input_invalid",
+        requires_human_review=True,
     )
 
 
@@ -512,33 +632,48 @@ def _build_tools_node(runtime: Week6WorkflowRuntime):
         for tool_name in state.tool_plan.planned_tools:
             raw_args = state.tool_plan.tool_arguments.get(tool_name, {})
             if tool_name == "policy_registry_lookup":
-                tool_input = _build_policy_registry_input(state=state, raw_args=raw_args)
-                result, execution = _invoke_tool_with_timeout(
-                    tool=runtime.policy_registry_tool,
-                    tool_input=tool_input,
-                    output_model=PolicyRegistryLookupResult,
-                    timeout_ms=runtime.tool_timeout_ms,
-                )
+                try:
+                    tool_input = _build_policy_registry_input(state=state, raw_args=raw_args)
+                except Exception as exc:
+                    result = None
+                    execution = _tool_input_build_failed(tool_name, exc)
+                else:
+                    result, execution = _invoke_tool_with_timeout(
+                        tool=runtime.policy_registry_tool,
+                        tool_input=tool_input,
+                        output_model=PolicyRegistryLookupResult,
+                        timeout_ms=runtime.tool_timeout_ms,
+                    )
                 if result is not None:
                     tool_context_lines.append(render_policy_registry_context(result))
             elif tool_name == "exception_log_lookup":
-                tool_input = _build_exception_log_input(state=state, raw_args=raw_args)
-                result, execution = _invoke_tool_with_timeout(
-                    tool=runtime.exception_log_tool,
-                    tool_input=tool_input,
-                    output_model=ExceptionLogLookupResult,
-                    timeout_ms=runtime.tool_timeout_ms,
-                )
+                try:
+                    tool_input = _build_exception_log_input(state=state, raw_args=raw_args)
+                except Exception as exc:
+                    result = None
+                    execution = _tool_input_build_failed(tool_name, exc)
+                else:
+                    result, execution = _invoke_tool_with_timeout(
+                        tool=runtime.exception_log_tool,
+                        tool_input=tool_input,
+                        output_model=ExceptionLogLookupResult,
+                        timeout_ms=runtime.tool_timeout_ms,
+                    )
                 if result is not None:
                     tool_context_lines.append(render_exception_log_context(result))
             elif tool_name == "tavily_search" and runtime.tavily_search_tool is not None:
-                tool_input = _build_tavily_search_input(state=state, raw_args=raw_args)
-                result, execution = _invoke_tool_with_timeout(
-                    tool=runtime.tavily_search_tool,
-                    tool_input=tool_input,
-                    output_model=TavilySearchResult,
-                    timeout_ms=runtime.tool_timeout_ms,
-                )
+                try:
+                    tool_input = _build_tavily_search_input(state=state, raw_args=raw_args)
+                except Exception as exc:
+                    result = None
+                    execution = _tool_input_build_failed(tool_name, exc)
+                else:
+                    result, execution = _invoke_tool_with_timeout(
+                        tool=runtime.tavily_search_tool,
+                        tool_input=tool_input,
+                        output_model=TavilySearchResult,
+                        timeout_ms=runtime.tool_timeout_ms,
+                    )
                 if result is not None:
                     tool_context_lines.append(render_tavily_context(result))
             else:
@@ -595,9 +730,36 @@ def _build_tools_node(runtime: Week6WorkflowRuntime):
 def _build_retrieve_node(runtime: Week6WorkflowRuntime):
     def _retrieve_node(raw_state: dict[str, Any]) -> dict[str, object]:
         state = ComplianceAgentState.from_graph_state(raw_state)
+        if "role_access_denied" in state.policy_flags or "prompt_injection_detected" in state.policy_flags:
+            state.retrieval_decision = DecisionEnum.ABSTAINED
+            state.retrieved_chunks = []
+            state.citations = []
+            state.decision_path.append("retrieve")
+            state.audit_events.append(
+                emit_workflow_audit_event(
+                    trace_id=state.trace_id,
+                    stage="graph.retrieve",
+                    status="blocked",
+                    input_payload={
+                        "question": _effective_question(state),
+                        "filters": state.retrieval_filters.model_dump(),
+                    },
+                    output_payload={
+                        "retrieval_decision": DecisionEnum.ABSTAINED.value,
+                        "chunk_count": 0,
+                    },
+                    metadata={
+                        "guardrail_reason": "role_access_denied"
+                        if "role_access_denied" in state.policy_flags
+                        else "prompt_injection_detected"
+                    },
+                )
+            )
+            return state.as_graph_state()
+
         response = run_retrieval(
             runtime.index,
-            question=state.normalized_query or state.question,
+            question=_effective_question(state),
             filters=state.retrieval_filters,
             embedding_provider=runtime.embedding_provider,
             rerank_provider=runtime.rerank_provider,
@@ -647,10 +809,64 @@ def _build_answer_node(runtime: Week6WorkflowRuntime):
     def _answer_node(raw_state: dict[str, Any]) -> dict[str, object]:
         state = ComplianceAgentState.from_graph_state(raw_state)
         attempt = state.answer_attempt + 1
+        if "prompt_injection_detected" in state.policy_flags:
+            state.answer_attempt = attempt
+            state.final_answer = DEFAULT_GUARDRAIL_REFUSAL_ANSWER
+            state.final_confidence = 0.0
+            state.final_decision = DecisionEnum.ABSTAINED
+            state.citations = []
+            state.abstention_reason = "prompt_injection_detected"
+            state.decision_path.append(f"answer_attempt_{attempt}")
+            state.audit_events.append(
+                emit_workflow_audit_event(
+                    trace_id=state.trace_id,
+                    stage="graph.answer",
+                    status="blocked",
+                    input_payload={
+                        "attempt": attempt,
+                        "question": _effective_question(state),
+                    },
+                    output_payload={
+                        "final_decision": state.final_decision.value,
+                        "abstention_reason": state.abstention_reason,
+                    },
+                    metadata={"guardrail_reason": "prompt_injection_detected"},
+                )
+            )
+            return state.as_graph_state()
+        if "role_access_denied" in state.policy_flags:
+            state.answer_attempt = attempt
+            state.final_answer = (
+                "Your role is not permitted to access the requested policy scope. "
+                "Please contact compliance for an approved review path."
+            )
+            state.final_confidence = 0.0
+            state.final_decision = DecisionEnum.ABSTAINED
+            state.citations = []
+            state.abstention_reason = "role_access_denied"
+            state.decision_path.append(f"answer_attempt_{attempt}")
+            state.audit_events.append(
+                emit_workflow_audit_event(
+                    trace_id=state.trace_id,
+                    stage="graph.answer",
+                    status="blocked",
+                    input_payload={
+                        "attempt": attempt,
+                        "question": _effective_question(state),
+                    },
+                    output_payload={
+                        "final_decision": state.final_decision.value,
+                        "abstention_reason": state.abstention_reason,
+                    },
+                    metadata={"guardrail_reason": "role_access_denied"},
+                )
+            )
+            return state.as_graph_state()
+
         retrieval_response = RetrievalResponse(
             trace_id=state.trace_id,
-            question=state.question,
-            normalized_query=state.normalized_query or state.question,
+            question=_effective_question(state),
+            normalized_query=state.normalized_query or _effective_question(state),
             decision=state.retrieval_decision,
             citations=state.citations,
             retrieved_chunks=state.retrieved_chunks,
@@ -737,6 +953,45 @@ def _policy_check_node(raw_state: dict[str, Any]) -> dict[str, object]:
         state.abstention_reason = "missing_citations_after_answer"
         _append_policy_flag(state, "missing_citations_after_answer")
 
+    answer_redaction_labels: list[str] = []
+    context_redaction_labels: list[str] = []
+    citation_redaction_labels: list[str] = []
+    chunk_redaction_labels: list[str] = []
+    tool_summary_redaction_count = 0
+    if state.final_answer:
+        answer_redaction = redact_sensitive_text(state.final_answer)
+        state.final_answer = answer_redaction.redacted_text
+        answer_redaction_labels = answer_redaction.applied_labels
+    if state.tool_context:
+        context_redaction = redact_sensitive_text(state.tool_context)
+        state.tool_context = context_redaction.redacted_text
+        context_redaction_labels = context_redaction.applied_labels
+    for index, tool_result in enumerate(state.tool_results):
+        redaction = redact_sensitive_text(tool_result.summary)
+        if redaction.applied_labels:
+            state.tool_results[index] = tool_result.model_copy(
+                update={"summary": redaction.redacted_text}
+            )
+            tool_summary_redaction_count += redaction.redaction_count
+    for index, citation in enumerate(state.citations):
+        redaction = redact_sensitive_text(citation.quote_span)
+        if redaction.applied_labels:
+            state.citations[index] = citation.model_copy(update={"quote_span": redaction.redacted_text})
+            citation_redaction_labels.extend(redaction.applied_labels)
+    for index, chunk in enumerate(state.retrieved_chunks):
+        redaction = redact_sensitive_text(chunk.content)
+        if redaction.applied_labels:
+            state.retrieved_chunks[index] = chunk.model_copy(update={"content": redaction.redacted_text})
+            chunk_redaction_labels.extend(redaction.applied_labels)
+    if (
+        answer_redaction_labels
+        or context_redaction_labels
+        or tool_summary_redaction_count
+        or citation_redaction_labels
+        or chunk_redaction_labels
+    ):
+        _append_policy_flag(state, "output_pii_redacted")
+
     state.decision_path.append("policy_check")
     state.audit_events.append(
         emit_workflow_audit_event(
@@ -750,6 +1005,13 @@ def _policy_check_node(raw_state: dict[str, Any]) -> dict[str, object]:
             output_payload={
                 "citation_count": len(state.citations),
                 "policy_flags": state.policy_flags,
+            },
+            metadata={
+                "answer_redaction_labels": ",".join(answer_redaction_labels),
+                "tool_context_redaction_labels": ",".join(context_redaction_labels),
+                "citation_redaction_labels": ",".join(citation_redaction_labels),
+                "retrieved_chunk_redaction_labels": ",".join(chunk_redaction_labels),
+                "tool_summary_redaction_count": tool_summary_redaction_count,
             },
         )
     )
@@ -930,6 +1192,7 @@ def run_week6_query(
     question: str,
     jurisdiction: str | None = None,
     policy_scope: list[str] | None = None,
+    user_role: str | None = None,
     top_k: int = 4,
     min_score_for_answer: float = 0.3,
     min_confidence_for_answer: float = 0.55,
@@ -941,7 +1204,7 @@ def run_week6_query(
     env: Mapping[str, str] | None = None,
     answer_chain_override: Runnable[Any, GroundedAnswerDraft] | None = None,
     tool_planner_override: Runnable[Any, Any] | None = None,
-    tool_timeout_ms: int = 250,
+    tool_timeout_ms: int = 5000,
     exception_log_path: Path | None = None,
     policy_registry_tool_override: BaseTool | None = None,
     exception_log_tool_override: BaseTool | None = None,
@@ -973,6 +1236,7 @@ def run_week6_query(
         retrieval_filters=RetrievalFilters(
             jurisdiction=jurisdiction,
             policy_scope=policy_scope or [],
+            user_role=user_role,
         ),
         max_answer_retries=max_answer_retries,
     )
@@ -986,11 +1250,18 @@ def run_week5_query(**kwargs: Any) -> ComplianceAgentState:
     return run_week6_query(**kwargs)
 
 
+def run_week7_query(**kwargs: Any) -> ComplianceAgentState:
+    """Week 7 alias for the guardrailed workflow entrypoint."""
+
+    return run_week6_query(**kwargs)
+
+
 build_week5_workflow = build_week6_workflow
+build_week7_workflow = build_week6_workflow
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run Week 6 LangGraph compliance workflow")
+    parser = argparse.ArgumentParser(description="Run Week 7 guardrailed LangGraph compliance workflow")
     parser.add_argument(
         "--manifest-path",
         type=Path,
@@ -999,6 +1270,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--question", type=str, required=True, help="Compliance question")
     parser.add_argument("--jurisdiction", type=str, default=None)
+    parser.add_argument("--user-role", type=str, default=None)
     parser.add_argument(
         "--policy-scope",
         type=str,
@@ -1026,7 +1298,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--trace-id", type=str, default=None)
     parser.add_argument("--max-answer-retries", type=int, default=1)
-    parser.add_argument("--tool-timeout-ms", type=int, default=250)
+    parser.add_argument("--tool-timeout-ms", type=int, default=5000)
+    parser.add_argument(
+        "--interactive-review",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Prompt the CLI operator for a manual review answer when escalation occurs.",
+    )
     parser.add_argument(
         "--exception-log-path",
         type=Path,
@@ -1036,14 +1314,253 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _read_cli_line(prompt: str) -> str:
+    print(prompt, file=sys.stderr, flush=True)
+    return sys.stdin.readline().rstrip("\n")
+
+
+def _truncate_single_line(text: str, *, limit: int = 220) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[: limit - 3].rstrip()}..."
+
+
+def _build_review_answer_options(state: ComplianceAgentState) -> list[dict[str, str]]:
+    return [
+        {
+            "label": "Not safe to answer",
+            "answer": state.final_answer,
+            "decision": DecisionEnum.ESCALATE.value,
+        },
+        {
+            "label": "Use context with LLM",
+            "answer": "Generate a reviewed answer from retrieved chunks and tool context.",
+            "decision": DecisionEnum.ANSWERED.value,
+        },
+        {
+            "label": "Custom answer",
+            "answer": "Enter a custom human-reviewed answer.",
+            "decision": DecisionEnum.ANSWERED.value,
+        },
+    ]
+
+def _format_human_review_context(state: ComplianceAgentState) -> str:
+    sections: list[str] = []
+    if state.retrieved_chunks:
+        chunk_lines = []
+        for chunk in state.retrieved_chunks:
+            section = chunk.metadata.get("section") or f"chunk-{chunk.chunk_index}"
+            chunk_lines.append(
+                "\n".join(
+                    [
+                        f"- doc_id: {chunk.doc_id}",
+                        f"  section: {section}",
+                        f"  retrieval_score: {chunk.retrieval_score:.4f}",
+                        f"  content: {chunk.content}",
+                    ]
+                )
+            )
+        sections.append("Retrieved evidence:\n" + "\n\n".join(chunk_lines))
+    if state.tool_context:
+        sections.append(f"Tool context:\n{state.tool_context}")
+    return "\n\n".join(sections).strip() or "NO_REVIEW_CONTEXT_AVAILABLE"
+
+
+def _build_human_review_answer_chain(
+    llm: Runnable[Any, Any],
+) -> Runnable[Any, BaselineChainOutput]:
+    parser = PydanticOutputParser(pydantic_object=BaselineChainOutput)
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                (
+                    "You are assisting a human compliance reviewer. "
+                    "Use only the supplied retrieved evidence and tool context. "
+                    "If the context is still not safe or sufficient, return decision ESCALATE. "
+                    "Return JSON only.\n{format_instructions}"
+                ),
+            ),
+            (
+                "human",
+                (
+                    "Question: {question}\n\n"
+                    "Escalation reason: {escalation_reason}\n\n"
+                    "Review context:\n{review_context}"
+                ),
+            ),
+        ]
+    ).partial(format_instructions=parser.get_format_instructions())
+    return prompt | llm | RunnableLambda(_to_text) | parser
+
+
+def _generate_human_review_answer(
+    *,
+    state: ComplianceAgentState,
+    review_llm: Runnable[Any, Any],
+) -> BaselineChainOutput:
+    chain = _build_human_review_answer_chain(review_llm)
+    try:
+        return chain.invoke(
+            {
+                "question": _effective_question(state),
+                "escalation_reason": state.escalation_reason or "unspecified",
+                "review_context": _format_human_review_context(state),
+            }
+        )
+    except Exception:
+        return BaselineChainOutput(
+            answer=DEFAULT_ESCALATE_ANSWER,
+            confidence=0.0,
+            decision=DecisionEnum.ESCALATE,
+        )
+
+
+def _collect_human_review(
+    state: ComplianceAgentState,
+    *,
+    review_llm: Runnable[Any, Any] | None,
+) -> dict[str, object] | None:
+    if not state.requires_human_review:
+        return None
+    if not sys.stdin.isatty() or not sys.stderr.isatty():
+        return None
+
+    print("", file=sys.stderr)
+    print("Human review required.", file=sys.stderr, flush=True)
+    print(f"trace_id: {state.trace_id}", file=sys.stderr, flush=True)
+    print(
+        f"escalation_reason: {state.escalation_reason or 'unspecified'}",
+        file=sys.stderr,
+        flush=True,
+    )
+    review_choice = _read_cli_line("Provide a manual reviewed answer now? [y/N]")
+    if review_choice.strip().lower() not in {"y", "yes"}:
+        return {
+            "status": "skipped",
+            "reviewer": "cli_operator",
+            "reason": state.escalation_reason,
+        }
+
+    options = _build_review_answer_options(state)
+    print("Select reviewed answer:", file=sys.stderr, flush=True)
+    for index, option in enumerate(options, start=1):
+        print(
+            f"{index}. [{option['decision']}] {option['label']}: {option['answer']}",
+            file=sys.stderr,
+            flush=True,
+        )
+    selection_raw = _read_cli_line(f"Choose option [1-{len(options)}]")
+    try:
+        selection = int(selection_raw.strip())
+    except ValueError:
+        return {
+            "status": "skipped",
+            "reviewer": "cli_operator",
+            "reason": "invalid_review_selection",
+        }
+
+    if selection == 1:
+        reviewed_answer = options[0]["answer"]
+        reviewed_decision = DecisionEnum.ESCALATE.value
+        reviewed_confidence = 0.0
+    elif selection == 2:
+        if review_llm is None:
+            return {
+                "status": "skipped",
+                "reviewer": "cli_operator",
+                "reason": "no_review_llm_configured",
+            }
+        review_output = _generate_human_review_answer(
+            state=state,
+            review_llm=review_llm,
+        )
+        reviewed_answer = review_output.answer
+        reviewed_decision = review_output.decision.value
+        reviewed_confidence = review_output.confidence
+    elif selection == 3:
+        reviewed_answer = _read_cli_line(
+            "Enter the final human-reviewed answer to return (single line):"
+        ).strip()
+        if not reviewed_answer:
+            return {
+                "status": "skipped",
+                "reviewer": "cli_operator",
+                "reason": "blank_review_answer",
+            }
+        decision_choice = _read_cli_line("Mark reviewed result as ANSWERED? [Y/n]").strip().lower()
+        reviewed_decision = (
+            DecisionEnum.ESCALATE.value
+            if decision_choice in {"n", "no"}
+            else DecisionEnum.ANSWERED.value
+        )
+        reviewed_confidence = 1.0 if reviewed_decision == DecisionEnum.ANSWERED.value else 0.0
+    else:
+        return {
+            "status": "skipped",
+            "reviewer": "cli_operator",
+            "reason": "invalid_review_selection",
+        }
+
+    return {
+        "status": "completed",
+        "reviewer": "cli_operator",
+        "selection": selection,
+        "reviewed_answer": reviewed_answer,
+        "reviewed_decision": reviewed_decision,
+        "reviewed_confidence": reviewed_confidence,
+        "requires_human_review": reviewed_decision != DecisionEnum.ANSWERED.value,
+    }
+
+
+def _build_cli_payload(
+    *,
+    state: ComplianceAgentState,
+    replay: Any,
+    human_review: dict[str, object] | None = None,
+) -> dict[str, object]:
+    state_payload = state.model_dump(mode="json")
+    answer = state.final_answer
+    decision = state.final_decision.value
+    confidence = state.final_confidence
+    requires_human_review = state.requires_human_review
+
+    if human_review is not None and human_review.get("status") == "completed":
+        answer = str(human_review["reviewed_answer"])
+        decision = str(human_review["reviewed_decision"])
+        confidence = float(human_review.get("reviewed_confidence", 0.0))
+        requires_human_review = bool(human_review["requires_human_review"])
+        state_payload["final_answer"] = answer
+        state_payload["final_decision"] = decision
+        state_payload["final_confidence"] = confidence
+        state_payload["requires_human_review"] = requires_human_review
+        state_payload["human_review"] = human_review
+
+    payload = {
+        "trace_id": state.trace_id,
+        "answer": answer,
+        "decision": decision,
+        "confidence": confidence,
+        "requires_human_review": requires_human_review,
+        "citations": [citation.model_dump(mode="json") for citation in state.citations],
+        "state": state_payload,
+        "replay": replay.model_dump(mode="json"),
+    }
+    if human_review is not None:
+        payload["human_review"] = human_review
+    return payload
+
+
 def main() -> None:
-    """CLI entrypoint for Week 6 workflow execution."""
+    """CLI entrypoint for Week 7 workflow execution."""
 
     args = _build_parser().parse_args()
     state = run_week6_query(
         manifest_path=args.manifest_path,
         question=args.question,
         jurisdiction=args.jurisdiction,
+        user_role=args.user_role,
         policy_scope=args.policy_scope,
         top_k=args.top_k,
         min_score_for_answer=args.min_score_for_answer,
@@ -1057,11 +1574,17 @@ def main() -> None:
         exception_log_path=args.exception_log_path,
     )
     replay = replay_audit_trace(state.audit_events, trace_id=state.trace_id)
-    payload = {
-        "trace_id": state.trace_id,
-        "state": state.model_dump(mode="json"),
-        "replay": replay.model_dump(mode="json"),
-    }
+    review_llm = resolve_answer_llm(args.llm_provider) if args.interactive_review else None
+    human_review = (
+        _collect_human_review(state, review_llm=review_llm)
+        if args.interactive_review
+        else None
+    )
+    payload = _build_cli_payload(
+        state=state,
+        replay=replay,
+        human_review=human_review,
+    )
     print(json.dumps(payload, indent=2, sort_keys=True))
 
 

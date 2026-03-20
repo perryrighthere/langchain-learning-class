@@ -1,4 +1,4 @@
-"""Week 6 tool routing and tool execution schemas."""
+"""Week 6/7 tool routing and tool execution schemas."""
 
 from __future__ import annotations
 
@@ -182,7 +182,8 @@ class TavilySearchInput(BaseModel):
     question: str = Field(..., min_length=1)
     topic: str = Field(default="general", min_length=1)
     max_results: int = Field(default=3, ge=1, le=10)
-    search_depth: str = Field(default="advanced", min_length=1)
+    search_depth: str = Field(default="basic", min_length=1)
+    time_range: str | None = None
     days: int | None = Field(default=None, ge=1, le=30)
 
     @field_validator("question", "topic", "search_depth")
@@ -192,6 +193,35 @@ class TavilySearchInput(BaseModel):
         if not normalized:
             raise ValueError("search field must not be blank")
         return normalized
+
+    @field_validator("topic")
+    @classmethod
+    def validate_topic(cls, value: str) -> str:
+        allowed = {"general", "news", "finance"}
+        normalized = value.strip().lower()
+        if normalized not in allowed:
+            raise ValueError(f"topic must be one of: {', '.join(sorted(allowed))}")
+        return normalized
+
+    @field_validator("search_depth")
+    @classmethod
+    def validate_search_depth(cls, value: str) -> str:
+        allowed = {"basic", "advanced", "fast", "ultra-fast"}
+        normalized = value.strip().lower()
+        if normalized not in allowed:
+            raise ValueError(f"search_depth must be one of: {', '.join(sorted(allowed))}")
+        return normalized
+
+    @field_validator("time_range")
+    @classmethod
+    def validate_time_range(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        allowed = {"day", "week", "month", "year", "d", "w", "m", "y"}
+        normalized = value.strip().lower()
+        if normalized not in allowed:
+            raise ValueError(f"time_range must be one of: {', '.join(sorted(allowed))}")
+        return normalized or None
 
 
 class TavilySearchSource(BaseModel):
